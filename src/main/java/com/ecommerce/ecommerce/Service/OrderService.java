@@ -1,0 +1,132 @@
+package com.ecommerce.ecommerce.Service;
+
+import com.ecommerce.ecommerce.Repository.AddressRepository;
+import com.ecommerce.ecommerce.Repository.OrderRepository;
+import com.ecommerce.ecommerce.dto.CheckoutRequest;
+import com.ecommerce.ecommerce.dto.OrderResponse;
+import com.ecommerce.ecommerce.entity.*;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.List;
+
+@Service
+public class OrderService {
+
+    private static final BigDecimal SHIPPING_FEE = BigDecimal.valueOf(49.00);
+
+    private final OrderRepository orderRepository;
+    private final AddressRepository addressRepository;
+    private final CurrentUserService currentUserService;
+    private final CartService cartService;
+    private final PaymentService paymentService;
+    private final AddressService addressService;
+
+    public OrderService(OrderRepository orderRepository,
+                        AddressRepository addressRepository,
+                        CurrentUserService currentUserService,
+                        CartService cartService,
+                        PaymentService paymentService,
+                        AddressService addressService) {
+        this.orderRepository = orderRepository;
+        this.addressRepository = addressRepository;
+        this.currentUserService = currentUserService;
+        this.cartService = cartService;
+        this.paymentService = paymentService;
+        this.addressService = addressService;
+    }
+
+    @Transactional
+    public OrderResponse checkout(CheckoutRequest request) {
+        User user = currentUserService.getCurrentUser();
+        Cart cart = cartService.getOrCreateCart(user);
+
+        if (cart.getItems().isEmpty()) {
+            throw new RuntimeException("Cart is empty");
+        }
+
+        Address shippingAddress = resolveAddress(request, user);
+
+        CustomerOrder order = new CustomerOrder();
+        order.setUser(user);
+        order.setShippingAddress(shippingAddress);
+        order.setStatus(OrderStatus.PAYMENT_PENDING);
+        order.setCreatedAt(Instant.now());
+
+        BigDecimal subtotal = BigDecimal.ZERO;
+
+        for (CartItem cartItem : cart.getItems()) {
+            Product product = cartItem.getProduct();
+            if (product.getQuantity() < cartItem.getQuantity()) {
+                throw new RuntimeException("Product out of stock: " + product.getName());
+            }
+
+            product.setQuantity(product.getQuantity() - cartItem.getQuantity());
+
+            BigDecimal unitPrice = BigDecimal.valueOf(product.getPrice());
+            BigDecimal lineTotal = unitPrice.multiply(BigDecimal.valueOf(cartItem.getQuantity()));
+            subtotal = subtotal.add(lineTotal);
+
+            OrderItem orderItem = new OrderItem();
+            orderItem.setOrder(order);
+            orderItem.setProduct(product);
+            orderItem.setProductName(product.getName());
+            orderItem.setQuantity(cartItem.getQuantity());
+            orderItem.setUnitPrice(unitPrice);
+            orderItem.setLineTotal(lineTotal);
+            order.getItems().add(orderItem);
+        }
+
+        order.setSubtotal(subtotal);
+        order.setShippingFee(SHIPPING_FEE);
+        order.setTotal(subtotal.add(SHIPPING_FEE));
+
+        CustomerOrder saved = orderRepository.save(order);
+        paymentService.createPendingPayment(saved, request.getPaymentMethod());
+        cartService.clearCart(user);
+
+        return new OrderResponse(saved);
+    }
+
+    @Transactional(readOnly = true)
+    public List<OrderResponse> listMyOrders() {
+        User user = currentUserService.getCurrentUser();
+        return orderRepository.findByUserOrderByCreatedAtDesc(user).stream()
+                .map(OrderResponse::new)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public OrderResponse getMyOrder(Long orderId) {
+        User user = currentUserService.getCurrentUser();
+        return new OrderResponse(orderRepository.findByIdAndUser(orderId, user)
+                .orElseThrow(() -> new RuntimeException("Order not found")));
+    }
+
+    CustomerOrder getMyOrderEntity(Long orderId) {
+        User user = currentUserService.getCurrentUser();
+        return orderRepository.findByIdAndUser(orderId, user)
+                .orElseThrow(() -> new RuntimeException("Order not found"));
+    }
+
+    @Transactional
+    public void markPaid(CustomerOrder order) {
+        order.setStatus(OrderStatus.PAID);
+        orderRepository.save(order);
+    }
+
+    private Address resolveAddress(CheckoutRequest request, User user) {
+        if (request.getAddressId() != null) {
+            return addressRepository.findByIdAndUser(request.getAddressId(), user)
+                    .orElseThrow(() -> new RuntimeException("Address not found"));
+        }
+
+        if (request.getAddress() == null) {
+            throw new RuntimeException("Shipping address is required");
+        }
+
+        return addressRepository.save(addressService.toAddress(request.getAddress(), user));
+    }
+}
