@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
@@ -57,6 +58,9 @@ class EcommerceApplicationTests {
     @Autowired
     private JwtUtil jwtUtil;
 
+    @Autowired
+    private RedisTemplate<String, String> redisTemplate;
+
     private User user;
     private Product product;
 
@@ -69,6 +73,8 @@ class EcommerceApplicationTests {
         productRepository.deleteAll();
         brandRepository.deleteAll();
         userRepository.deleteAll();
+        redisTemplate.delete("otp:newcustomer@example.com");
+        redisTemplate.delete("register:newcustomer@example.com");
 
         user = new User();
         user.setEmail("customer@example.com");
@@ -92,6 +98,103 @@ class EcommerceApplicationTests {
         product.setCategory(Category.FOOTWEAR);
         product.setBrand(brand);
         product = productRepository.save(product);
+    }
+
+    @Test
+    void userCanRegisterWithRedisOtpAndThenLogin() throws Exception {
+        mockMvc.perform(post("/auth/register-request")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "email": "newcustomer@example.com",
+                                  "phone": "8888888888",
+                                  "username": "New Customer",
+                                  "password": "password123",
+                                  "confirmPassword": "password123"
+                                }
+                                """))
+                .andExpect(status().isOk());
+
+        String otp = redisTemplate.opsForValue().get("otp:newcustomer@example.com");
+        assertThat(otp).isNotBlank();
+
+        mockMvc.perform(post("/auth/register-verify")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "email": "newcustomer@example.com",
+                                  "otp": "%s"
+                                }
+                                """.formatted(otp)))
+                .andExpect(status().isOk());
+
+        assertThat(redisTemplate.hasKey("otp:newcustomer@example.com")).isFalse();
+        assertThat(redisTemplate.hasKey("register:newcustomer@example.com")).isFalse();
+        assertThat(userRepository.findByEmail("newcustomer@example.com")).isPresent();
+
+        mockMvc.perform(post("/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "email": "newcustomer@example.com",
+                                  "password": "password123"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.token").exists());
+    }
+
+    @Test
+    void adminCanCreateBrandAndProductThenCustomerCanViewProduct() throws Exception {
+        User admin = new User();
+        admin.setEmail("admin@example.com");
+        admin.setPhone("7777777777");
+        admin.setUsername("Admin");
+        admin.setPassword(passwordEncoder.encode("password123"));
+        admin.setRole(Role.ADMIN);
+        admin = userRepository.save(admin);
+
+        String adminToken = jwtUtil.generateToken(admin.getId(), admin.getRole().name());
+
+        String brandResponse = mockMvc.perform(post("/admin/brand")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "name": "Nova",
+                                  "logoUrl": "https://example.com/nova.png"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("Nova"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        long brandId = objectMapper.readTree(brandResponse).get("id").asLong();
+
+        mockMvc.perform(post("/admin/product")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "name": "Nova Watch",
+                                  "description": "Smart watch",
+                                  "price": 4999.0,
+                                  "quantity": 5,
+                                  "imageUrl": "https://example.com/watch.png",
+                                  "category": "ELECTRONICS",
+                                  "brand": {
+                                    "id": %d
+                                  }
+                                }
+                                """.formatted(brandId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("Nova Watch"));
+
+        mockMvc.perform(get("/products"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[?(@.name == 'Nova Watch')]").exists());
     }
 
     @Test
