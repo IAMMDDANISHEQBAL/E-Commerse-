@@ -5,6 +5,9 @@ import com.ecommerce.ecommerce.entity.Product;
 import com.ecommerce.ecommerce.Repository.BrandRepository;
 import com.ecommerce.ecommerce.Repository.ProductRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
 
 @Service
 public class AdminProductService {
@@ -23,9 +26,36 @@ public class AdminProductService {
         this.productCacheService = productCacheService;
     }
 
+    @Transactional(readOnly = true)
+    public List<Brand> listBrands() {
+        return brandRepository.findAll();
+    }
+
     public Brand createBrand(Brand brand) {
 
         return brandRepository.save(brand);
+    }
+
+    public Brand updateBrand(Long brandId, Brand request) {
+        Brand brand = brandRepository.findById(brandId)
+                .orElseThrow(() -> new RuntimeException("Brand not found"));
+        brand.setName(request.getName());
+        brand.setLogoUrl(request.getLogoUrl());
+        Brand saved = brandRepository.save(brand);
+        productCacheService.refreshProductCache();
+        return saved;
+    }
+
+    public void deleteBrand(Long brandId) {
+        Brand brand = brandRepository.findById(brandId)
+                .orElseThrow(() -> new RuntimeException("Brand not found"));
+        brandRepository.delete(brand);
+        productCacheService.refreshProductCache();
+    }
+
+    @Transactional(readOnly = true)
+    public List<Product> listProducts() {
+        return productRepository.findAll();
     }
 
     public Product createProduct(Product product) {
@@ -64,6 +94,13 @@ public class AdminProductService {
         Product saved = productRepository.save(product);
         productCacheService.cacheProduct(saved);
         return saved;
+    }
+
+    public void deleteProduct(Long productId) {
+        Product product = productRepository.findById(productId)
+                .orElseThrow(() -> new RuntimeException("Product not found"));
+        productRepository.delete(product);
+        productCacheService.evictProduct(productId);
     }
 
     private void normalizeProduct(Product product) {

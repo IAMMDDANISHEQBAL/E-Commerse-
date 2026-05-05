@@ -90,6 +90,24 @@ img {
   width: 42px;
 }
 
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.tabs button {
+  background: #e5eef0;
+  color: #203137;
+}
+
+.tabs button.active,
+.tabs button:hover {
+  background: #126b5c;
+  color: #fff;
+}
+
 .grid {
   align-items: start;
   display: grid;
@@ -106,8 +124,7 @@ img {
   padding: 16px;
 }
 
-.panel:nth-of-type(3),
-.panel:nth-of-type(4) {
+.panel.wide {
   grid-column: span 8;
 }
 
@@ -200,6 +217,10 @@ img {
   gap: 10px;
 }
 
+.list.spaced {
+  margin-top: 12px;
+}
+
 .row,
 .total {
   align-items: center;
@@ -209,6 +230,26 @@ img {
   gap: 12px;
   justify-content: space-between;
   padding: 12px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.danger {
+  background: #a23a3a;
+}
+
+.danger:hover:not(:disabled) {
+  background: #842f2f;
+}
+
+.adminRow {
+  display: grid;
+  grid-template-columns: 1fr 110px auto;
 }
 
 .row strong,
@@ -241,8 +282,7 @@ img {
 
 @media (max-width: 1100px) {
   .panel,
-  .panel:nth-of-type(3),
-  .panel:nth-of-type(4) {
+  .panel.wide {
     grid-column: span 6;
   }
 }
@@ -261,8 +301,7 @@ img {
   }
 
   .panel,
-  .panel:nth-of-type(3),
-  .panel:nth-of-type(4) {
+  .panel.wide {
     grid-column: 1 / -1;
   }
 

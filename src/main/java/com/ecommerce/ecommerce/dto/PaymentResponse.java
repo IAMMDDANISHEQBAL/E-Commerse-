@@ -15,6 +15,7 @@ public class PaymentResponse {
     private final PaymentStatus status;
     private final BigDecimal amount;
     private final String providerReference;
+    private final String providerOrderId;
     private final Instant paidAt;
 
     public PaymentResponse(Payment payment) {
@@ -24,6 +25,7 @@ public class PaymentResponse {
         this.status = payment.getStatus();
         this.amount = payment.getAmount();
         this.providerReference = payment.getProviderReference();
+        this.providerOrderId = payment.getStatus() == PaymentStatus.PENDING ? payment.getProviderReference() : null;
         this.paidAt = payment.getPaidAt();
     }
 
@@ -49,6 +51,10 @@ public class PaymentResponse {
 
     public String getProviderReference() {
         return providerReference;
+    }
+
+    public String getProviderOrderId() {
+        return providerOrderId;
     }
 
     public Instant getPaidAt() {

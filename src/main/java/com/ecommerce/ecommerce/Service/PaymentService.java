@@ -54,6 +54,10 @@ public class PaymentService {
             payment.setProviderReference("cod-" + UUID.randomUUID());
             payment.setPaidAt(Instant.now());
             completePaidOrder(order);
+        } else {
+            Payment savedPayment = paymentRepository.save(payment);
+            savedPayment.setProviderReference(paymentGateway.createProviderOrder(savedPayment));
+            return paymentRepository.save(savedPayment);
         }
 
         return paymentRepository.save(payment);
@@ -69,8 +73,9 @@ public class PaymentService {
             return new PaymentResponse(payment);
         }
 
+        String paymentReference = paymentGateway.verifyAndCapture(payment, request);
         payment.setStatus(PaymentStatus.PAID);
-        payment.setProviderReference(paymentGateway.charge(payment, request.getProviderToken()));
+        payment.setProviderReference(paymentReference);
         payment.setPaidAt(Instant.now());
         completePaidOrder(order);
 

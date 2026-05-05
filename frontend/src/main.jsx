@@ -9,6 +9,7 @@ import {
   RefreshCcw,
   Shield,
   ShoppingCart,
+  Trash2,
   UserPlus
 } from "lucide-react";
 import "./styles.css";
@@ -41,15 +42,16 @@ async function api(path, options = {}, token) {
   }
 
   if (!response.ok) {
-    const message = data?.message || data || `Request failed: ${response.status}`;
-    throw new Error(message);
+    throw new Error(data?.message || data || `Request failed: ${response.status}`);
   }
-
   return data;
 }
 
 function App() {
+  const [view, setView] = useState("store");
   const [products, setProducts] = useState([]);
+  const [adminProducts, setAdminProducts] = useState([]);
+  const [brands, setBrands] = useState([]);
   const [cart, setCart] = useState(null);
   const [orders, setOrders] = useState([]);
   const [customerToken, setCustomerToken] = useState(localStorage.getItem("customerToken") || "");
@@ -59,6 +61,7 @@ function App() {
   const [busy, setBusy] = useState(false);
 
   const [login, setLogin] = useState({ email: "customer@example.com", password: "password123" });
+  const [googleLogin, setGoogleLogin] = useState({ email: "", name: "", idToken: "" });
   const [adminLogin, setAdminLogin] = useState({ email: "admin@shop.com", password: "admin123" });
   const [register, setRegister] = useState({
     email: "",
@@ -68,8 +71,9 @@ function App() {
     confirmPassword: ""
   });
   const [otp, setOtp] = useState("");
-  const [brand, setBrand] = useState({ name: "", logoUrl: "" });
+  const [brand, setBrand] = useState({ id: "", name: "", logoUrl: "" });
   const [product, setProduct] = useState({
+    id: "",
     name: "",
     description: "",
     price: "",
@@ -111,8 +115,7 @@ function App() {
   }
 
   async function loadProducts() {
-    const data = await api("/products");
-    setProducts(data || []);
+    setProducts((await api("/products")) || []);
   }
 
   async function loadCart(token = customerToken) {
@@ -128,8 +131,17 @@ function App() {
 
   async function loadOrders(token = customerToken) {
     if (!token) return;
-    const data = await api("/orders", {}, token);
-    setOrders(data || []);
+    setOrders((await api("/orders", {}, token)) || []);
+  }
+
+  async function loadAdminData(token = adminToken) {
+    if (!token) return;
+    const [brandData, productData] = await Promise.all([
+      api("/admin/brands", {}, token),
+      api("/admin/products", {}, token)
+    ]);
+    setBrands(brandData || []);
+    setAdminProducts(productData || []);
   }
 
   useEffect(() => {
@@ -139,10 +151,16 @@ function App() {
 
   useEffect(() => {
     if (customerToken) {
-      loadCart().catch((error) => setMessage(error.message));
-      loadOrders().catch((error) => setMessage(error.message));
+      loadCart(customerToken).catch((error) => setMessage(error.message));
+      loadOrders(customerToken).catch((error) => setMessage(error.message));
     }
   }, [customerToken]);
+
+  useEffect(() => {
+    if (adminToken) {
+      loadAdminData(adminToken).catch((error) => setMessage(error.message));
+    }
+  }, [adminToken]);
 
   async function loginCustomer() {
     await run("Customer login", async () => {
@@ -152,8 +170,17 @@ function App() {
       });
       setCustomerToken(data.token);
       localStorage.setItem("customerToken", data.token);
-      await loadCart(data.token);
-      await loadOrders(data.token);
+    });
+  }
+
+  async function loginWithGoogle() {
+    await run("Google login", async () => {
+      const data = await api("/auth/google", {
+        method: "POST",
+        body: JSON.stringify({ ...googleLogin, guestCartId })
+      });
+      setCustomerToken(data.token);
+      localStorage.setItem("customerToken", data.token);
     });
   }
 
@@ -165,6 +192,7 @@ function App() {
       });
       setAdminToken(data.token);
       localStorage.setItem("adminToken", data.token);
+      await loadAdminData(data.token);
     });
   }
 
@@ -184,6 +212,7 @@ function App() {
         body: JSON.stringify({ email: register.email, otp })
       });
       setLogin({ email: register.email, password: register.password });
+      setView("account");
     });
   }
 
@@ -248,33 +277,39 @@ function App() {
         );
       }
 
-      await loadCart();
-      await loadOrders();
-      await loadProducts();
+      await Promise.all([loadCart(), loadOrders(), loadProducts()]);
     });
   }
 
-  async function createBrand() {
-    await run("Creating brand", async () => {
+  async function saveBrand() {
+    await run(brand.id ? "Updating brand" : "Creating brand", async () => {
       const created = await api(
-        "/admin/brand",
+        brand.id ? `/admin/brand/${brand.id}` : "/admin/brand",
         {
-          method: "POST",
-          body: JSON.stringify(brand)
+          method: brand.id ? "PUT" : "POST",
+          body: JSON.stringify({ name: brand.name, logoUrl: brand.logoUrl })
         },
         adminToken
       );
       setProduct((current) => ({ ...current, brandId: String(created.id) }));
-      setBrand({ name: "", logoUrl: "" });
+      setBrand({ id: "", name: "", logoUrl: "" });
+      await loadAdminData();
     });
   }
 
-  async function createProduct() {
-    await run("Creating product", async () => {
+  async function deleteBrand(id) {
+    await run("Deleting brand", async () => {
+      await api(`/admin/brand/${id}`, { method: "DELETE" }, adminToken);
+      await loadAdminData();
+    });
+  }
+
+  async function saveProduct() {
+    await run(product.id ? "Updating product" : "Creating product", async () => {
       await api(
-        "/admin/product",
+        product.id ? `/admin/product/${product.id}` : "/admin/product",
         {
-          method: "POST",
+          method: product.id ? "PUT" : "POST",
           body: JSON.stringify({
             name: product.name,
             description: product.description,
@@ -282,21 +317,53 @@ function App() {
             quantity: Number(product.quantity),
             imageUrl: product.imageUrl,
             category: product.category,
-            brand: { id: Number(product.brandId) }
+            brand: product.brandId ? { id: Number(product.brandId) } : null
           })
         },
         adminToken
       );
-      setProduct({
-        name: "",
-        description: "",
-        price: "",
-        quantity: "",
-        imageUrl: "",
-        category: "ELECTRONICS",
-        brandId: ""
-      });
-      await loadProducts();
+      resetProductForm();
+      await Promise.all([loadAdminData(), loadProducts()]);
+    });
+  }
+
+  async function updateInventory(item, quantity) {
+    await run("Updating inventory", async () => {
+      await api(`/admin/product/${item.id}/inventory?quantity=${Number(quantity)}`, { method: "PUT" }, adminToken);
+      await Promise.all([loadAdminData(), loadProducts()]);
+    });
+  }
+
+  async function deleteProduct(id) {
+    await run("Deleting product", async () => {
+      await api(`/admin/product/${id}`, { method: "DELETE" }, adminToken);
+      await Promise.all([loadAdminData(), loadProducts()]);
+    });
+  }
+
+  function editProduct(item) {
+    setProduct({
+      id: String(item.id),
+      name: item.name || "",
+      description: item.description || "",
+      price: String(item.price || ""),
+      quantity: String(item.quantity || ""),
+      imageUrl: item.imageUrl || "",
+      category: item.category || "ELECTRONICS",
+      brandId: item.brand?.id ? String(item.brand.id) : ""
+    });
+  }
+
+  function resetProductForm() {
+    setProduct({
+      id: "",
+      name: "",
+      description: "",
+      price: "",
+      quantity: "",
+      imageUrl: "",
+      category: "ELECTRONICS",
+      brandId: ""
     });
   }
 
@@ -304,60 +371,172 @@ function App() {
     <main className="app">
       <header className="topbar">
         <div>
-          <h1>E-Commerce Backend Console</h1>
+          <h1>Shop Console</h1>
           <p>{message}</p>
         </div>
         <button className="iconButton" onClick={() => run("Refreshing", async () => {
-          await loadProducts();
-          await loadCart();
-          await loadOrders();
+          await Promise.all([loadProducts(), loadCart(), loadOrders(), loadAdminData()]);
         })} disabled={busy} title="Refresh">
           <RefreshCcw size={18} />
         </button>
       </header>
 
-      <section className="grid">
-        <Panel title="Customer Access" icon={<LogIn size={18} />}>
-          <div className="formGrid">
-            <input value={login.email} onChange={(event) => setLogin({ ...login, email: event.target.value })} placeholder="Email" />
-            <input value={login.password} onChange={(event) => setLogin({ ...login, password: event.target.value })} placeholder="Password" type="password" />
-            <button onClick={loginCustomer}>Login</button>
-          </div>
-          <div className="statusLine">{customerToken ? "Customer token active" : "Login required for cart and checkout"}</div>
-        </Panel>
+      <nav className="tabs">
+        {[
+          ["store", "Store"],
+          ["account", "Account"],
+          ["checkout", `Cart (${cartCount})`],
+          ["admin", "Admin"]
+        ].map(([key, label]) => (
+          <button className={view === key ? "active" : ""} key={key} onClick={() => setView(key)}>
+            {label}
+          </button>
+        ))}
+      </nav>
 
-        <Panel title="OTP Registration" icon={<UserPlus size={18} />}>
-          <div className="formGrid compact">
-            <input value={register.email} onChange={(event) => setRegister({ ...register, email: event.target.value })} placeholder="Email" />
-            <input value={register.phone} onChange={(event) => setRegister({ ...register, phone: event.target.value })} placeholder="Phone" />
-            <input value={register.username} onChange={(event) => setRegister({ ...register, username: event.target.value })} placeholder="Username" />
-            <input value={register.password} onChange={(event) => setRegister({ ...register, password: event.target.value })} placeholder="Password" type="password" />
-            <input value={register.confirmPassword} onChange={(event) => setRegister({ ...register, confirmPassword: event.target.value })} placeholder="Confirm password" type="password" />
-            <button onClick={registerRequest}>Send OTP</button>
-            <input value={otp} onChange={(event) => setOtp(event.target.value)} placeholder="OTP from backend console" />
-            <button onClick={verifyOtp}>Verify</button>
-          </div>
-        </Panel>
+      {view === "store" && (
+        <section className="grid">
+          <Panel title={`Products (${products.length})`} icon={<Boxes size={18} />} wide>
+            <div className="products">
+              {products.map((item) => (
+                <article className="product" key={item.id}>
+                  <img src={item.imageUrl} alt={item.name} />
+                  <div>
+                    <h3>{item.name}</h3>
+                    <p>{item.description}</p>
+                    <div className="meta">
+                      <span>{money(item.price)}</span>
+                      <span>{item.quantity} in stock</span>
+                    </div>
+                  </div>
+                  <button onClick={() => addToCart(item.id)} disabled={item.quantity < 1}>
+                    <ShoppingCart size={16} /> Add
+                  </button>
+                </article>
+              ))}
+            </div>
+          </Panel>
+        </section>
+      )}
 
-        <Panel title="Admin Catalog" icon={<Shield size={18} />}>
-          <div className="formGrid">
-            <input value={adminLogin.email} onChange={(event) => setAdminLogin({ ...adminLogin, email: event.target.value })} placeholder="Admin email" />
-            <input value={adminLogin.password} onChange={(event) => setAdminLogin({ ...adminLogin, password: event.target.value })} placeholder="Admin password" type="password" />
-            <button onClick={loginAdmin}>Admin Login</button>
-          </div>
-          <div className="splitForm">
+      {view === "account" && (
+        <section className="grid">
+          <Panel title="Customer Login" icon={<LogIn size={18} />}>
+            <div className="formGrid">
+              <input value={login.email} onChange={(event) => setLogin({ ...login, email: event.target.value })} placeholder="Email" />
+              <input value={login.password} onChange={(event) => setLogin({ ...login, password: event.target.value })} placeholder="Password" type="password" />
+              <button onClick={loginCustomer}>Login</button>
+            </div>
+            <div className="statusLine">{customerToken ? "Customer token active" : "Guest cart is active"}</div>
+          </Panel>
+
+          <Panel title="Google OAuth" icon={<LogIn size={18} />}>
+            <div className="formGrid">
+              <input value={googleLogin.idToken} onChange={(event) => setGoogleLogin({ ...googleLogin, idToken: event.target.value })} placeholder="Google ID token" />
+              <input value={googleLogin.email} onChange={(event) => setGoogleLogin({ ...googleLogin, email: event.target.value })} placeholder="Local fallback email" />
+              <input value={googleLogin.name} onChange={(event) => setGoogleLogin({ ...googleLogin, name: event.target.value })} placeholder="Display name" />
+              <button onClick={loginWithGoogle}>Continue with Google</button>
+            </div>
+          </Panel>
+
+          <Panel title="OTP Registration" icon={<UserPlus size={18} />}>
             <div className="formGrid compact">
+              <input value={register.email} onChange={(event) => setRegister({ ...register, email: event.target.value })} placeholder="Email" />
+              <input value={register.phone} onChange={(event) => setRegister({ ...register, phone: event.target.value })} placeholder="Phone" />
+              <input value={register.username} onChange={(event) => setRegister({ ...register, username: event.target.value })} placeholder="Username" />
+              <input value={register.password} onChange={(event) => setRegister({ ...register, password: event.target.value })} placeholder="Password" type="password" />
+              <input value={register.confirmPassword} onChange={(event) => setRegister({ ...register, confirmPassword: event.target.value })} placeholder="Confirm password" type="password" />
+              <button onClick={registerRequest}>Send OTP</button>
+              <input value={otp} onChange={(event) => setOtp(event.target.value)} placeholder="OTP from backend console" />
+              <button onClick={verifyOtp}>Verify</button>
+            </div>
+          </Panel>
+        </section>
+      )}
+
+      {view === "checkout" && (
+        <section className="grid">
+          <Panel title={`Cart (${cartCount})`} icon={<ShoppingCart size={18} />}>
+            <CartList cart={cart} updateCart={updateCart} />
+          </Panel>
+
+          <Panel title="Checkout" icon={<CreditCard size={18} />}>
+            <div className="formGrid compact">
+              {["fullName", "phone", "line1", "line2", "city", "state", "postalCode", "country"].map((field) => (
+                <input key={field} value={checkout[field]} onChange={(event) => setCheckout({ ...checkout, [field]: event.target.value })} placeholder={field} />
+              ))}
+              <select value={checkout.paymentMethod} onChange={(event) => setCheckout({ ...checkout, paymentMethod: event.target.value })}>
+                <option>CARD</option>
+                <option>UPI</option>
+                <option>NET_BANKING</option>
+                <option>CASH_ON_DELIVERY</option>
+              </select>
+              <button onClick={placeOrder} disabled={!customerToken || !cart?.items?.length}>
+                <BadgeIndianRupee size={16} /> Place Order
+              </button>
+            </div>
+          </Panel>
+
+          <Panel title={`Orders (${orders.length})`} icon={<PackagePlus size={18} />}>
+            <div className="list">
+              {orders.map((order) => (
+                <div className="row" key={order.id}>
+                  <div>
+                    <strong>Order #{order.id}</strong>
+                    <span>{order.status} - {money(order.total)}</span>
+                  </div>
+                  <span>{order.items.length} items</span>
+                </div>
+              ))}
+            </div>
+          </Panel>
+        </section>
+      )}
+
+      {view === "admin" && (
+        <section className="grid">
+          <Panel title="Admin Login" icon={<Shield size={18} />}>
+            <div className="formGrid">
+              <input value={adminLogin.email} onChange={(event) => setAdminLogin({ ...adminLogin, email: event.target.value })} placeholder="Admin email" />
+              <input value={adminLogin.password} onChange={(event) => setAdminLogin({ ...adminLogin, password: event.target.value })} placeholder="Admin password" type="password" />
+              <button onClick={loginAdmin}>Admin Login</button>
+            </div>
+            <div className="statusLine">{adminToken ? "Admin token active" : "Admin credentials required"}</div>
+          </Panel>
+
+          <Panel title="Manage Brands" icon={<Shield size={18} />}>
+            <div className="formGrid">
               <input value={brand.name} onChange={(event) => setBrand({ ...brand, name: event.target.value })} placeholder="Brand name" />
               <input value={brand.logoUrl} onChange={(event) => setBrand({ ...brand, logoUrl: event.target.value })} placeholder="Logo URL" />
-              <button onClick={createBrand} disabled={!adminToken}>Create Brand</button>
+              <button onClick={saveBrand} disabled={!adminToken}>{brand.id ? "Update Brand" : "Create Brand"}</button>
             </div>
+            <div className="list spaced">
+              {brands.map((item) => (
+                <div className="row" key={item.id}>
+                  <div>
+                    <strong>{item.name}</strong>
+                    <span>#{item.id}</span>
+                  </div>
+                  <div className="actions">
+                    <button onClick={() => setBrand({ id: String(item.id), name: item.name || "", logoUrl: item.logoUrl || "" })}>Edit</button>
+                    <button className="danger" onClick={() => deleteBrand(item.id)}><Trash2 size={14} /></button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Panel>
+
+          <Panel title="Manage Products" icon={<PackagePlus size={18} />} wide>
             <div className="formGrid compact">
               <input value={product.name} onChange={(event) => setProduct({ ...product, name: event.target.value })} placeholder="Product name" />
               <input value={product.description} onChange={(event) => setProduct({ ...product, description: event.target.value })} placeholder="Description" />
               <input value={product.price} onChange={(event) => setProduct({ ...product, price: event.target.value })} placeholder="Price" type="number" />
               <input value={product.quantity} onChange={(event) => setProduct({ ...product, quantity: event.target.value })} placeholder="Quantity" type="number" />
               <input value={product.imageUrl} onChange={(event) => setProduct({ ...product, imageUrl: event.target.value })} placeholder="Image URL" />
-              <input value={product.brandId} onChange={(event) => setProduct({ ...product, brandId: event.target.value })} placeholder="Brand ID" type="number" />
+              <select value={product.brandId} onChange={(event) => setProduct({ ...product, brandId: event.target.value })}>
+                <option value="">No brand</option>
+                {brands.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}
+              </select>
               <select value={product.category} onChange={(event) => setProduct({ ...product, category: event.target.value })}>
                 <option>ELECTRONICS</option>
                 <option>CLOTHING</option>
@@ -365,97 +544,57 @@ function App() {
                 <option>ACCESSORIES</option>
                 <option>JWELLERY</option>
               </select>
-              <button onClick={createProduct} disabled={!adminToken}>Create Product</button>
+              <button onClick={saveProduct} disabled={!adminToken}>{product.id ? "Update Product" : "Create Product"}</button>
             </div>
-          </div>
-        </Panel>
-
-        <Panel title={`Products (${products.length})`} icon={<Boxes size={18} />}>
-          <div className="products">
-            {products.map((item) => (
-              <article className="product" key={item.id}>
-                <img src={item.imageUrl || "https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=600"} alt={item.name} />
-                <div>
-                  <h3>{item.name}</h3>
-                  <p>{item.description}</p>
-                  <div className="meta">
-                    <span>{money(item.price)}</span>
-                    <span>{item.quantity} in stock</span>
+            <div className="list spaced">
+              {adminProducts.map((item) => (
+                <div className="row adminRow" key={item.id}>
+                  <div>
+                    <strong>{item.name}</strong>
+                    <span>{money(item.price)} - {item.brand?.name || "No brand"}</span>
+                  </div>
+                  <input defaultValue={item.quantity} type="number" min="0" onBlur={(event) => updateInventory(item, event.target.value)} />
+                  <div className="actions">
+                    <button onClick={() => editProduct(item)}>Edit</button>
+                    <button className="danger" onClick={() => deleteProduct(item.id)}><Trash2 size={14} /></button>
                   </div>
                 </div>
-                <button onClick={() => addToCart(item.id)} disabled={!customerToken || item.quantity < 1}>
-                  <ShoppingCart size={16} /> Add
-                </button>
-              </article>
-            ))}
-          </div>
-        </Panel>
-
-        <Panel title={`Cart (${cartCount})`} icon={<ShoppingCart size={18} />}>
-          <div className="list">
-            {(cart?.items || []).map((item) => (
-              <div className="row" key={item.productId}>
-                <div>
-                  <strong>{item.productName}</strong>
-                  <span>{money(item.lineTotal)}</span>
-                </div>
-                <div className="stepper">
-                  <button onClick={() => updateCart(item.productId, item.quantity - 1)}>-</button>
-                  <span>{item.quantity}</span>
-                  <button onClick={() => updateCart(item.productId, item.quantity + 1)}>+</button>
-                </div>
-              </div>
-            ))}
-            <div className="total">
-              <span>Subtotal</span>
-              <strong>{money(cart?.subtotal || 0)}</strong>
+              ))}
             </div>
-          </div>
-        </Panel>
-
-        <Panel title="Checkout" icon={<CreditCard size={18} />}>
-          <div className="formGrid compact">
-            <input value={checkout.fullName} onChange={(event) => setCheckout({ ...checkout, fullName: event.target.value })} placeholder="Full name" />
-            <input value={checkout.phone} onChange={(event) => setCheckout({ ...checkout, phone: event.target.value })} placeholder="Phone" />
-            <input value={checkout.line1} onChange={(event) => setCheckout({ ...checkout, line1: event.target.value })} placeholder="Address line 1" />
-            <input value={checkout.line2} onChange={(event) => setCheckout({ ...checkout, line2: event.target.value })} placeholder="Address line 2" />
-            <input value={checkout.city} onChange={(event) => setCheckout({ ...checkout, city: event.target.value })} placeholder="City" />
-            <input value={checkout.state} onChange={(event) => setCheckout({ ...checkout, state: event.target.value })} placeholder="State" />
-            <input value={checkout.postalCode} onChange={(event) => setCheckout({ ...checkout, postalCode: event.target.value })} placeholder="Postal code" />
-            <input value={checkout.country} onChange={(event) => setCheckout({ ...checkout, country: event.target.value })} placeholder="Country" />
-            <select value={checkout.paymentMethod} onChange={(event) => setCheckout({ ...checkout, paymentMethod: event.target.value })}>
-              <option>CARD</option>
-              <option>UPI</option>
-              <option>NET_BANKING</option>
-              <option>CASH_ON_DELIVERY</option>
-            </select>
-            <button onClick={placeOrder} disabled={!customerToken || !cart?.items?.length}>
-              <BadgeIndianRupee size={16} /> Place Order
-            </button>
-          </div>
-        </Panel>
-
-        <Panel title={`Orders (${orders.length})`} icon={<PackagePlus size={18} />}>
-          <div className="list">
-            {orders.map((order) => (
-              <div className="row" key={order.id}>
-                <div>
-                  <strong>Order #{order.id}</strong>
-                  <span>{order.status} · {money(order.total)}</span>
-                </div>
-                <span>{order.items.length} items</span>
-              </div>
-            ))}
-          </div>
-        </Panel>
-      </section>
+          </Panel>
+        </section>
+      )}
     </main>
   );
 }
 
-function Panel({ title, icon, children }) {
+function CartList({ cart, updateCart }) {
   return (
-    <section className="panel">
+    <div className="list">
+      {(cart?.items || []).map((item) => (
+        <div className="row" key={item.productId}>
+          <div>
+            <strong>{item.productName}</strong>
+            <span>{money(item.lineTotal)}</span>
+          </div>
+          <div className="stepper">
+            <button onClick={() => updateCart(item.productId, item.quantity - 1)}>-</button>
+            <span>{item.quantity}</span>
+            <button onClick={() => updateCart(item.productId, item.quantity + 1)}>+</button>
+          </div>
+        </div>
+      ))}
+      <div className="total">
+        <span>Subtotal</span>
+        <strong>{money(cart?.subtotal || 0)}</strong>
+      </div>
+    </div>
+  );
+}
+
+function Panel({ title, icon, children, wide = false }) {
+  return (
+    <section className={`panel ${wide ? "wide" : ""}`}>
       <div className="panelHeader">
         <span>{icon}</span>
         <h2>{title}</h2>

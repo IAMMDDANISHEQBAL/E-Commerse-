@@ -116,6 +116,12 @@ public class ProductCacheService {
         redisTemplate.opsForHash().put(STOCK_KEY, id, String.valueOf(product.getQuantity()));
     }
 
+    public void evictProduct(Long productId) {
+        redisTemplate.opsForSet().remove(PRODUCT_IDS_KEY, productId.toString());
+        redisTemplate.opsForHash().delete(STOCK_KEY, productId.toString());
+        redisTemplate.delete(productKey(productId));
+    }
+
     private Product fromCache(Map<Object, Object> fields) {
         Product product = new Product();
         product.setId(Long.valueOf(read(fields, "id")));

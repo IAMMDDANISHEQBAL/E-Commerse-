@@ -26,6 +26,7 @@ public class AuthService {
     private final EmailService emailService;
     private final RedisTemplate<String, String> redisTemplate;
     private final CartService cartService;
+    private final GoogleOAuthService googleOAuthService;
 
     public AuthService(UserRepository userRepository,
                        PasswordEncoder passwordEncoder,
@@ -33,7 +34,8 @@ public class AuthService {
                        OtpService otpService,
                        EmailService emailService,
                        RedisTemplate<String, String> redisTemplate,
-                       CartService cartService) {
+                       CartService cartService,
+                       GoogleOAuthService googleOAuthService) {
 
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
@@ -42,6 +44,7 @@ public class AuthService {
         this.emailService = emailService;
         this.redisTemplate = redisTemplate;
         this.cartService = cartService;
+        this.googleOAuthService = googleOAuthService;
     }
 
     // =========================
@@ -126,13 +129,15 @@ public class AuthService {
     }
 
     public LoginResponse googleLogin(GoogleLoginRequest request) {
-        User user = userRepository.findByEmail(request.getEmail())
+        GoogleOAuthService.VerifiedGoogleUser googleUser = googleOAuthService.verify(request);
+
+        User user = userRepository.findByEmail(googleUser.email())
                 .orElseGet(() -> {
                     User created = new User();
-                    created.setEmail(request.getEmail());
-                    created.setUsername(request.getName() == null || request.getName().isBlank()
-                            ? request.getEmail()
-                            : request.getName());
+                    created.setEmail(googleUser.email());
+                    created.setUsername(googleUser.name() == null || googleUser.name().isBlank()
+                            ? googleUser.email()
+                            : googleUser.name());
                     created.setPassword(passwordEncoder.encode("GOOGLE_OAUTH_USER"));
                     created.setRole(Role.USER);
                     return userRepository.save(created);

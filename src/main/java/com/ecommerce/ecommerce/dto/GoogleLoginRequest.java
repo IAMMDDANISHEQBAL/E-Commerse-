@@ -1,16 +1,11 @@
 package com.ecommerce.ecommerce.dto;
 
-import jakarta.validation.constraints.Email;
-import jakarta.validation.constraints.NotBlank;
-
 public class GoogleLoginRequest {
 
-    @Email
-    @NotBlank
     private String email;
 
     private String name;
-    private String googleToken;
+    private String idToken;
     private String guestCartId;
 
     public String getEmail() {
@@ -29,12 +24,12 @@ public class GoogleLoginRequest {
         this.name = name;
     }
 
-    public String getGoogleToken() {
-        return googleToken;
+    public String getIdToken() {
+        return idToken;
     }
 
-    public void setGoogleToken(String googleToken) {
-        this.googleToken = googleToken;
+    public void setIdToken(String idToken) {
+        this.idToken = idToken;
     }
 
     public String getGuestCartId() {
