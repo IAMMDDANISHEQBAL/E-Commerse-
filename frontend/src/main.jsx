@@ -54,11 +54,12 @@ function App() {
   const [orders, setOrders] = useState([]);
   const [customerToken, setCustomerToken] = useState(localStorage.getItem("customerToken") || "");
   const [adminToken, setAdminToken] = useState(localStorage.getItem("adminToken") || "");
+  const [guestCartId, setGuestCartId] = useState(localStorage.getItem("guestCartId") || "");
   const [message, setMessage] = useState("Ready");
   const [busy, setBusy] = useState(false);
 
   const [login, setLogin] = useState({ email: "customer@example.com", password: "password123" });
-  const [adminLogin, setAdminLogin] = useState({ email: "admin@example.com", password: "admin12345" });
+  const [adminLogin, setAdminLogin] = useState({ email: "admin@shop.com", password: "admin123" });
   const [register, setRegister] = useState({
     email: "",
     phone: "",
@@ -115,8 +116,13 @@ function App() {
   }
 
   async function loadCart(token = customerToken) {
-    if (!token) return;
-    const data = await api("/cart", {}, token);
+    const data = await api("/cart", {
+      headers: guestCartId && !token ? { "X-Guest-Cart-Id": guestCartId } : {}
+    }, token);
+    if (!token && data?.cartKey && !data.cartKey.startsWith("user:")) {
+      setGuestCartId(data.cartKey);
+      localStorage.setItem("guestCartId", data.cartKey);
+    }
     setCart(data);
   }
 
@@ -128,6 +134,7 @@ function App() {
 
   useEffect(() => {
     loadProducts().catch((error) => setMessage(error.message));
+    loadCart("").catch((error) => setMessage(error.message));
   }, []);
 
   useEffect(() => {
@@ -141,7 +148,7 @@ function App() {
     await run("Customer login", async () => {
       const data = await api("/auth/login", {
         method: "POST",
-        body: JSON.stringify(login)
+        body: JSON.stringify({ ...login, guestCartId })
       });
       setCustomerToken(data.token);
       localStorage.setItem("customerToken", data.token);
@@ -186,6 +193,7 @@ function App() {
         "/cart/items",
         {
           method: "POST",
+          headers: guestCartId && !customerToken ? { "X-Guest-Cart-Id": guestCartId } : {},
           body: JSON.stringify({ productId, quantity: 1 })
         },
         customerToken
@@ -196,10 +204,11 @@ function App() {
 
   async function updateCart(productId, quantity) {
     await run("Updating cart", async () => {
+      const guestHeaders = guestCartId && !customerToken ? { "X-Guest-Cart-Id": guestCartId } : {};
       if (quantity < 1) {
-        await api(`/cart/items/${productId}`, { method: "DELETE" }, customerToken);
+        await api(`/cart/items/${productId}`, { method: "DELETE", headers: guestHeaders }, customerToken);
       } else {
-        await api(`/cart/items/${productId}?quantity=${quantity}`, { method: "PUT" }, customerToken);
+        await api(`/cart/items/${productId}?quantity=${quantity}`, { method: "PUT", headers: guestHeaders }, customerToken);
       }
       await loadCart();
     });

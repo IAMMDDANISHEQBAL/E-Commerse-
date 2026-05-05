@@ -41,6 +41,11 @@ public class OrderService {
     @Transactional
     public OrderResponse checkout(CheckoutRequest request) {
         User user = currentUserService.getCurrentUser();
+        if (user.getRole() == Role.ADMIN) {
+            throw new RuntimeException("Admin accounts cannot place orders");
+        }
+
+        cartService.forceSyncCurrentUserCart();
         Cart cart = cartService.getOrCreateCart(user);
 
         if (cart.getItems().isEmpty()) {
@@ -63,8 +68,6 @@ public class OrderService {
                 throw new RuntimeException("Product out of stock: " + product.getName());
             }
 
-            product.setQuantity(product.getQuantity() - cartItem.getQuantity());
-
             BigDecimal unitPrice = BigDecimal.valueOf(product.getPrice());
             BigDecimal lineTotal = unitPrice.multiply(BigDecimal.valueOf(cartItem.getQuantity()));
             subtotal = subtotal.add(lineTotal);
@@ -85,7 +88,6 @@ public class OrderService {
 
         CustomerOrder saved = orderRepository.save(order);
         paymentService.createPendingPayment(saved, request.getPaymentMethod());
-        cartService.clearCart(user);
 
         return new OrderResponse(saved);
     }

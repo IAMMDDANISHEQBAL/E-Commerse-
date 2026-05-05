@@ -18,23 +18,26 @@ public class CartController {
     }
 
     @GetMapping
-    public CartResponse getCart() {
-        return cartService.getCart();
+    public CartResponse getCart(@RequestHeader(value = "X-Guest-Cart-Id", required = false) String guestCartId) {
+        return cartService.getCart(guestCartId);
     }
 
     @PostMapping("/items")
-    public CartResponse addItem(@Valid @RequestBody CartItemRequest request) {
-        return cartService.addItem(request);
+    public CartResponse addItem(@Valid @RequestBody CartItemRequest request,
+                                @RequestHeader(value = "X-Guest-Cart-Id", required = false) String guestCartId) {
+        return cartService.addItem(request, guestCartId);
     }
 
     @PutMapping("/items/{productId}")
     public CartResponse updateItem(@PathVariable Long productId,
-                                   @RequestParam @Min(1) int quantity) {
-        return cartService.updateItem(productId, quantity);
+                                   @RequestParam @Min(1) int quantity,
+                                   @RequestHeader(value = "X-Guest-Cart-Id", required = false) String guestCartId) {
+        return cartService.updateItem(productId, quantity, guestCartId);
     }
 
     @DeleteMapping("/items/{productId}")
-    public CartResponse removeItem(@PathVariable Long productId) {
-        return cartService.removeItem(productId);
+    public CartResponse removeItem(@PathVariable Long productId,
+                                   @RequestHeader(value = "X-Guest-Cart-Id", required = false) String guestCartId) {
+        return cartService.removeItem(productId, guestCartId);
     }
 }

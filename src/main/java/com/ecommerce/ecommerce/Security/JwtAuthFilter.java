@@ -37,7 +37,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
         if (path.startsWith("/auth/")
                 || path.startsWith("/h2-console")
-                || ("GET".equals(request.getMethod()) && path.equals("/products"))) {
+                || ("GET".equals(request.getMethod()) && path.startsWith("/products"))) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -45,7 +45,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         String authHeader = request.getHeader("Authorization");
 
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+            filterChain.doFilter(request, response);
             return;
         }
 

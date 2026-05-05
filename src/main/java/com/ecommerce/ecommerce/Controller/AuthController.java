@@ -2,6 +2,7 @@ package com.ecommerce.ecommerce.Controller;
 
 import com.ecommerce.ecommerce.dto.LoginRequest;
 import com.ecommerce.ecommerce.dto.LoginResponse;
+import com.ecommerce.ecommerce.dto.GoogleLoginRequest;
 import com.ecommerce.ecommerce.dto.RegisterRequest;
 import com.ecommerce.ecommerce.dto.VerifyOtpRequest;
 import com.ecommerce.ecommerce.Service.AuthService;
@@ -42,5 +43,10 @@ public class AuthController {
     @PostMapping("/login")
     public LoginResponse login(@Valid @RequestBody LoginRequest request) {
         return authService.login(request);
+    }
+
+    @PostMapping("/google")
+    public LoginResponse googleLogin(@Valid @RequestBody GoogleLoginRequest request) {
+        return authService.googleLogin(request);
     }
 }

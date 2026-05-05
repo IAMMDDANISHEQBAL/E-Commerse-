@@ -16,6 +16,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.util.Set;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -75,6 +77,12 @@ class EcommerceApplicationTests {
         userRepository.deleteAll();
         redisTemplate.delete("otp:newcustomer@example.com");
         redisTemplate.delete("register:newcustomer@example.com");
+        Set<String> productIds = redisTemplate.opsForSet().members("products:ids");
+        if (productIds != null) {
+            productIds.forEach(id -> redisTemplate.delete("product:" + id));
+        }
+        redisTemplate.delete("products:ids");
+        redisTemplate.delete("products:stock");
 
         user = new User();
         user.setEmail("customer@example.com");
@@ -263,9 +271,9 @@ class EcommerceApplicationTests {
         mockMvc.perform(get("/cart")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.items").isEmpty());
+                .andExpect(jsonPath("$.items[0].quantity").value(2));
 
-        assertThat(productRepository.findById(product.getId()).orElseThrow().getQuantity()).isEqualTo(8);
+        assertThat(productRepository.findById(product.getId()).orElseThrow().getQuantity()).isEqualTo(10);
 
         mockMvc.perform(get("/payments/orders/{orderId}", orderId)
                         .header("Authorization", "Bearer " + token))
@@ -288,12 +296,21 @@ class EcommerceApplicationTests {
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("PAID"));
+
+        mockMvc.perform(get("/cart")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items").isEmpty());
+
+        assertThat(productRepository.findById(product.getId()).orElseThrow().getQuantity()).isEqualTo(8);
     }
 
     @Test
-    void protectedCartEndpointRejectsAnonymousUsers() throws Exception {
+    void guestCanUseCartWithoutLogin() throws Exception {
         mockMvc.perform(get("/cart"))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.cartKey").isNotEmpty())
+                .andExpect(jsonPath("$.items").isArray());
     }
 
     @Test

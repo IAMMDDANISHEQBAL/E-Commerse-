@@ -1,6 +1,7 @@
 package com.ecommerce.ecommerce.dto;
 
 import com.ecommerce.ecommerce.entity.CartItem;
+import com.ecommerce.ecommerce.entity.Product;
 
 import java.math.BigDecimal;
 
@@ -13,10 +14,14 @@ public class CartResponseItem {
     private final BigDecimal lineTotal;
 
     public CartResponseItem(CartItem item) {
-        this.productId = item.getProduct().getId();
-        this.productName = item.getProduct().getName();
-        this.quantity = item.getQuantity();
-        this.unitPrice = BigDecimal.valueOf(item.getProduct().getPrice());
+        this(item.getProduct(), item.getQuantity());
+    }
+
+    public CartResponseItem(Product product, int quantity) {
+        this.productId = product.getId();
+        this.productName = product.getName();
+        this.quantity = quantity;
+        this.unitPrice = BigDecimal.valueOf(product.getPrice());
         this.lineTotal = unitPrice.multiply(BigDecimal.valueOf(quantity));
     }
 

@@ -36,10 +36,12 @@ public class SecurityConfig {
                                 "/auth/register-request",
                                 "/auth/register-verify",
                                 "/auth/login",
+                                "/auth/google",
                                 "/h2-console/**"
                         ).permitAll()
 
-                        .requestMatchers(HttpMethod.GET, "/products").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/products/**").permitAll()
+                        .requestMatchers("/cart/**").permitAll()
                         .requestMatchers("/admin/**").hasRole("ADMIN")
 
                         .anyRequest().authenticated()

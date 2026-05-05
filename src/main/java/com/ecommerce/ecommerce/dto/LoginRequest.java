@@ -12,6 +12,8 @@ public class LoginRequest {
     @NotBlank
     private String password;
 
+    private String guestCartId;
+
     public String getEmail() {
         return email;
     }
@@ -20,11 +22,19 @@ public class LoginRequest {
         return password;
     }
 
+    public String getGuestCartId() {
+        return guestCartId;
+    }
+
     public void setEmail(String email) {
         this.email = email;
     }
 
     public void setPassword(String password) {
         this.password = password;
+    }
+
+    public void setGuestCartId(String guestCartId) {
+        this.guestCartId = guestCartId;
     }
 }

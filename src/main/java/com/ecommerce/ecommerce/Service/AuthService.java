@@ -2,6 +2,7 @@ package com.ecommerce.ecommerce.Service;
 
 import com.ecommerce.ecommerce.dto.LoginRequest;
 import com.ecommerce.ecommerce.dto.LoginResponse;
+import com.ecommerce.ecommerce.dto.GoogleLoginRequest;
 import com.ecommerce.ecommerce.dto.RegisterRequest;
 import com.ecommerce.ecommerce.dto.VerifyOtpRequest;
 import com.ecommerce.ecommerce.entity.Role;
@@ -24,13 +25,15 @@ public class AuthService {
     private final OtpService otpService;
     private final EmailService emailService;
     private final RedisTemplate<String, String> redisTemplate;
+    private final CartService cartService;
 
     public AuthService(UserRepository userRepository,
                        PasswordEncoder passwordEncoder,
                        JwtUtil jwtUtil,
                        OtpService otpService,
                        EmailService emailService,
-                       RedisTemplate<String, String> redisTemplate) {
+                       RedisTemplate<String, String> redisTemplate,
+                       CartService cartService) {
 
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
@@ -38,6 +41,7 @@ public class AuthService {
         this.otpService = otpService;
         this.emailService = emailService;
         this.redisTemplate = redisTemplate;
+        this.cartService = cartService;
     }
 
     // =========================
@@ -114,11 +118,31 @@ public class AuthService {
             throw new RuntimeException("Invalid password");
         }
 
-        String token = jwtUtil.generateToken(
-                user.getId(),
-                user.getRole().name()
-        );
+        cartService.mergeGuestCartIntoUser(request.getGuestCartId(), user);
+
+        String token = jwtUtil.generateToken(user.getId(), user.getRole().name());
 
         return new LoginResponse(token);
+    }
+
+    public LoginResponse googleLogin(GoogleLoginRequest request) {
+        User user = userRepository.findByEmail(request.getEmail())
+                .orElseGet(() -> {
+                    User created = new User();
+                    created.setEmail(request.getEmail());
+                    created.setUsername(request.getName() == null || request.getName().isBlank()
+                            ? request.getEmail()
+                            : request.getName());
+                    created.setPassword(passwordEncoder.encode("GOOGLE_OAUTH_USER"));
+                    created.setRole(Role.USER);
+                    return userRepository.save(created);
+                });
+
+        if (user.getRole() == Role.ADMIN) {
+            throw new RuntimeException("Admin accounts must use admin credentials");
+        }
+
+        cartService.mergeGuestCartIntoUser(request.getGuestCartId(), user);
+        return new LoginResponse(jwtUtil.generateToken(user.getId(), user.getRole().name()));
     }
 }
