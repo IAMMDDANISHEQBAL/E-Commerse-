@@ -222,7 +222,12 @@ public class CartService {
             Long productId = Long.valueOf(entry.getKey().toString());
             int quantity = Integer.parseInt(entry.getValue().toString());
             if (quantity > 0) {
-                responseItems.add(new CartResponseItem(productCacheService.getProduct(productId), quantity));
+                try {
+                    responseItems.add(new CartResponseItem(productCacheService.getProduct(productId), quantity));
+                } catch (RuntimeException exception) {
+                    redisTemplate.opsForHash().delete(owner.redisKey(), productId.toString());
+                    log.warn("Removed stale product {} from Redis cart {}", productId, owner.redisKey());
+                }
             }
         }
         return new CartResponse(owner.publicKey(), responseItems);

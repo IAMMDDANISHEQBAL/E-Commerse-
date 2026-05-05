@@ -128,6 +128,7 @@ function App() {
   const [productForm, setProductForm] = useState(emptyProduct);
   const [checkout, setCheckout] = useState(defaultAddress);
   const [payment, setPayment] = useState({ orderId: "", providerOrderId: "", razorpayPaymentId: "", razorpaySignature: "" });
+  const [paymentModal, setPaymentModal] = useState(null);
 
   const cartCount = useMemo(() => cart?.items?.reduce((sum, item) => sum + item.quantity, 0) || 0, [cart]);
   const cartTotal = Number(cart?.subtotal || 0);
@@ -381,6 +382,8 @@ function App() {
         setPayment(nextPayment);
         if (frontendConfig.paymentProvider === "razorpay" && frontendConfig.razorpayKeyId) {
           await openRazorpayCheckout(order, pending, nextPayment.providerOrderId);
+        } else {
+          setPaymentModal({ order, pendingPayment: pending, providerOrderId: nextPayment.providerOrderId });
         }
       }
     });
@@ -617,6 +620,7 @@ function App() {
           verifyOtp={verifyOtp}
           logout={() => logout("customer")}
           googleClientId={frontendConfig.googleClientId}
+          googleVerificationEnabled={frontendConfig.googleVerificationEnabled}
           onGoogleCredential={(idToken) => {
             setGoogleLogin((current) => ({ ...current, idToken }));
             loginWithGoogle(idToken);
@@ -653,6 +657,17 @@ function App() {
 
       {selectedProduct && (
         <ProductModal product={selectedProduct} onClose={() => setSelectedProduct(null)} addToCart={addToCart} />
+      )}
+
+      {paymentModal && (
+        <MockPaymentModal
+          details={paymentModal}
+          onClose={() => setPaymentModal(null)}
+          onPay={async () => {
+            await confirmPayment();
+            setPaymentModal(null);
+          }}
+        />
       )}
 
       {busy && <div className="busyBar" />}
@@ -769,7 +784,7 @@ function CartPage({ cart, cartTotal, shippingFee, updateCart, setPage, customerT
   );
 }
 
-function CheckoutPage({ cart, cartTotal, shippingFee, checkout, setCheckout, errors, placeOrder, payment, setPayment, confirmPayment, paymentProvider }) {
+function CheckoutPage({ cart, cartTotal, shippingFee, checkout, setCheckout, errors, placeOrder, payment, paymentProvider }) {
   return (
     <section className="pageGrid checkoutGrid">
       <Panel title="Shipping Address" icon={<CreditCard size={19} />}>
@@ -800,23 +815,10 @@ function CheckoutPage({ cart, cartTotal, shippingFee, checkout, setCheckout, err
         </button>
       </OrderSummary>
 
-      {payment.orderId && paymentProvider !== "razorpay" && (
-        <Panel title="Payment Confirmation" icon={<BadgeIndianRupee size={19} />}>
-          <div className="paymentBox">
-            <div>
-              <span>Provider Order</span>
-              <strong>{payment.providerOrderId}</strong>
-            </div>
-            <Field name="razorpayPaymentId" placeholder="Razorpay payment id" value={payment.razorpayPaymentId} onChange={(value) => setPayment({ ...payment, razorpayPaymentId: value })} />
-            <Field name="razorpaySignature" placeholder="Razorpay signature" value={payment.razorpaySignature} onChange={(value) => setPayment({ ...payment, razorpaySignature: value })} />
-            <button className="primaryAction" onClick={confirmPayment}><CheckCircle2 size={17} /> Confirm Payment</button>
-          </div>
-        </Panel>
-      )}
       {payment.orderId && paymentProvider === "razorpay" && (
         <Panel title="Payment Pending" icon={<BadgeIndianRupee size={19} />}>
           <div className="paymentBox">
-            <span>Razorpay Checkout was opened for this order. If it was dismissed, place the order again or refresh your payment from Orders after adding a retry endpoint.</span>
+            <span>Razorpay Checkout opened for this order. If you dismissed it, place the order again after cancelling this pending order.</span>
           </div>
         </Panel>
       )}
@@ -824,7 +826,7 @@ function CheckoutPage({ cart, cartTotal, shippingFee, checkout, setCheckout, err
   );
 }
 
-function AccountPage({ customerToken, login, setLogin, googleLogin, setGoogleLogin, register, setRegister, otp, setOtp, errors, loginCustomer, loginWithGoogle, registerRequest, verifyOtp, logout, googleClientId, onGoogleCredential }) {
+function AccountPage({ customerToken, login, setLogin, googleLogin, setGoogleLogin, register, setRegister, otp, setOtp, errors, loginCustomer, loginWithGoogle, registerRequest, verifyOtp, logout, googleClientId, googleVerificationEnabled, onGoogleCredential }) {
   return (
     <section className="pageGrid accountGrid">
       <Panel title="Customer Sign In" icon={<LogIn size={19} />}>
@@ -845,11 +847,21 @@ function AccountPage({ customerToken, login, setLogin, googleLogin, setGoogleLog
 
       <Panel title="Google OAuth" icon={<LogIn size={19} />}>
         <div className="formGrid">
-          {googleClientId && <GoogleSignInButton clientId={googleClientId} onCredential={onGoogleCredential} />}
-          <Field name="idToken" placeholder="Google ID token" value={googleLogin.idToken} onChange={(value) => setGoogleLogin({ ...googleLogin, idToken: value })} />
-          <Field name="googleEmail" placeholder="Email for local mode" value={googleLogin.email} error={errors.email} onChange={(value) => setGoogleLogin({ ...googleLogin, email: value })} />
-          <Field name="googleName" placeholder="Display name" value={googleLogin.name} onChange={(value) => setGoogleLogin({ ...googleLogin, name: value })} />
-          <button onClick={loginWithGoogle}>Continue with Google</button>
+          {googleClientId ? (
+            <GoogleSignInButton clientId={googleClientId} onCredential={onGoogleCredential} />
+          ) : (
+            <button className="googleFallback" disabled>
+              <span className="googleGlyph">G</span>
+              Configure Google Client ID
+            </button>
+          )}
+          {!googleVerificationEnabled && !googleClientId && (
+            <>
+              <Field name="googleEmail" placeholder="Demo Google email" value={googleLogin.email} error={errors.email} onChange={(value) => setGoogleLogin({ ...googleLogin, email: value })} />
+              <Field name="googleName" placeholder="Display name" value={googleLogin.name} onChange={(value) => setGoogleLogin({ ...googleLogin, name: value })} />
+              <button onClick={() => loginWithGoogle()}>Use Demo Google Login</button>
+            </>
+          )}
         </div>
       </Panel>
 
@@ -1027,6 +1039,34 @@ function ProductModal({ product, onClose, addToCart }) {
             <ShoppingCart size={17} /> Add to Cart
           </button>
         </div>
+      </article>
+    </div>
+  );
+}
+
+function MockPaymentModal({ details, onClose, onPay }) {
+  return (
+    <div className="modalBackdrop">
+      <article className="paymentModal">
+        <button className="modalClose" onClick={onClose}><X size={18} /></button>
+        <div className="paymentHeader">
+          <BadgeIndianRupee size={28} />
+          <div>
+            <span>Secure demo payment</span>
+            <h2>Complete your payment</h2>
+          </div>
+        </div>
+        <div className="paymentRows">
+          <div><span>Order</span><strong>#{details.order.id}</strong></div>
+          <div><span>Provider order</span><strong>{details.providerOrderId}</strong></div>
+          <div><span>Amount</span><strong>{money(details.pendingPayment.amount || details.order.total)}</strong></div>
+        </div>
+        <div className="demoCard">
+          <span>Demo Card</span>
+          <strong>4111 1111 1111 1111</strong>
+          <small>Use real Razorpay config to show Razorpay Checkout here.</small>
+        </div>
+        <button className="primaryAction" onClick={onPay}><CheckCircle2 size={17} /> Pay Securely</button>
       </article>
     </div>
   );

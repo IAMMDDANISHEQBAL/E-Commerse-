@@ -506,7 +506,8 @@ img {
   z-index: 50;
 }
 
-.productModal {
+.productModal,
+.paymentModal {
   background: #fff;
   border-radius: 8px;
   display: grid;
@@ -516,6 +517,12 @@ img {
   padding: 18px;
   position: relative;
   width: 100%;
+}
+
+.paymentModal {
+  gap: 16px;
+  grid-template-columns: 1fr;
+  max-width: 460px;
 }
 
 .productModal img {
@@ -529,6 +536,58 @@ img {
   align-content: start;
   display: grid;
   gap: 12px;
+}
+
+.paymentHeader {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+}
+
+.paymentHeader h2 {
+  font-size: 22px;
+  margin: 0;
+}
+
+.paymentRows,
+.demoCard {
+  border: 1px solid #dce5e8;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.paymentRows div {
+  display: flex;
+  justify-content: space-between;
+}
+
+.demoCard {
+  background: #17202a;
+  color: #fff;
+}
+
+.demoCard span,
+.demoCard small,
+.paymentHeader span {
+  color: #607177;
+}
+
+.googleFallback {
+  background: #fff;
+  border: 1px solid #cfd9df;
+  color: #17202a;
+  justify-content: flex-start;
+}
+
+.googleGlyph {
+  align-items: center;
+  color: #4285f4;
+  display: inline-flex;
+  font-weight: 800;
+  justify-content: center;
+  width: 24px;
 }
 
 .productModal h2 {
