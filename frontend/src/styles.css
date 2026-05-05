@@ -209,6 +209,23 @@ img {
   padding: 18px;
 }
 
+.loginPrompt {
+  align-items: center;
+  background: #fff8e7;
+  border: 1px solid #f2d39b;
+  border-radius: 8px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+}
+
+.loginPrompt div,
+.loginPrompt span {
+  display: block;
+}
+
 .dealBand img {
   aspect-ratio: 1;
   background: #eef3f5;
@@ -226,6 +243,10 @@ img {
 .paymentBox span {
   color: #607177;
   font-size: 13px;
+}
+
+.googleButton {
+  min-height: 44px;
 }
 
 .dealBand h1 {
@@ -412,7 +433,7 @@ img {
 
 .orderCard,
 .manageRow {
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 1fr auto auto;
 }
 
 .productManageRow {

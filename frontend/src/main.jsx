@@ -86,9 +86,25 @@ async function api(path, options = {}, token) {
   return data;
 }
 
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    if (document.querySelector(`script[src="${src}"]`)) {
+      resolve();
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = src;
+    script.async = true;
+    script.onload = resolve;
+    script.onerror = () => reject(new Error(`Unable to load ${src}`));
+    document.body.appendChild(script);
+  });
+}
+
 function App() {
   const [page, setPage] = useState("home");
   const [products, setProducts] = useState([]);
+  const [frontendConfig, setFrontendConfig] = useState({ paymentProvider: "mock", razorpayKeyId: "", googleClientId: "" });
   const [brands, setBrands] = useState([]);
   const [adminProducts, setAdminProducts] = useState([]);
   const [cart, setCart] = useState(null);
@@ -130,7 +146,7 @@ function App() {
   }, [products, query, category]);
 
   useEffect(() => {
-    Promise.all([loadProducts(), loadCart("")]).catch(showError);
+    Promise.all([loadConfig(), loadProducts(), loadCart("")]).catch(showError);
   }, []);
 
   useEffect(() => {
@@ -167,6 +183,10 @@ function App() {
 
   async function loadProducts() {
     setProducts((await api("/products")) || []);
+  }
+
+  async function loadConfig() {
+    setFrontendConfig(await api("/public/config"));
   }
 
   async function loadCart(token = customerToken) {
@@ -216,15 +236,17 @@ function App() {
       setCustomerToken(data.token);
       localStorage.setItem("customerToken", data.token);
       setPage("cart");
+      await Promise.all([loadCart(data.token), loadOrders(data.token)]);
     });
   }
 
-  async function loginWithGoogle() {
-    if (!googleLogin.idToken && !validate({ email: googleLogin.email })) return;
+  async function loginWithGoogle(idTokenOverride = "") {
+    const payload = idTokenOverride ? { ...googleLogin, idToken: idTokenOverride } : googleLogin;
+    if (!payload.idToken && !validate({ email: payload.email })) return;
     await run("Google sign in", async () => {
       const data = await api("/auth/google", {
         method: "POST",
-        body: JSON.stringify({ ...googleLogin, guestCartId })
+        body: JSON.stringify({ ...payload, guestCartId })
       });
       setCustomerToken(data.token);
       localStorage.setItem("customerToken", data.token);
@@ -281,12 +303,16 @@ function App() {
 
   async function addToCart(productId) {
     await run("Adding to cart", async () => {
-      await api("/cart/items", {
+      const data = await api("/cart/items", {
         method: "POST",
         headers: guestCartId && !customerToken ? { "X-Guest-Cart-Id": guestCartId } : {},
         body: JSON.stringify({ productId, quantity: 1 })
       }, customerToken);
-      await loadCart();
+      if (!customerToken && data?.cartKey && !data.cartKey.startsWith("user:")) {
+        setGuestCartId(data.cartKey);
+        localStorage.setItem("guestCartId", data.cartKey);
+      }
+      setCart(data);
       setPage("cart");
     });
   }
@@ -346,13 +372,60 @@ function App() {
         setPayment({ orderId: "", providerOrderId: "", razorpayPaymentId: "", razorpaySignature: "" });
       } else {
         const pending = await api(`/payments/orders/${order.id}`, {}, customerToken);
-        setPayment({
+        const nextPayment = {
           orderId: String(order.id),
           providerOrderId: pending.providerOrderId || pending.providerReference || "",
           razorpayPaymentId: "",
           razorpaySignature: ""
-        });
+        };
+        setPayment(nextPayment);
+        if (frontendConfig.paymentProvider === "razorpay" && frontendConfig.razorpayKeyId) {
+          await openRazorpayCheckout(order, pending, nextPayment.providerOrderId);
+        }
       }
+    });
+  }
+
+  async function openRazorpayCheckout(order, pendingPayment, providerOrderId) {
+    await loadScript("https://checkout.razorpay.com/v1/checkout.js");
+    await new Promise((resolve, reject) => {
+      const checkoutInstance = new window.Razorpay({
+        key: frontendConfig.razorpayKeyId,
+        amount: Math.round(Number(pendingPayment.amount || order.total) * 100),
+        currency: "INR",
+        name: "ShopSphere",
+        description: `Order #${order.id}`,
+        order_id: providerOrderId,
+        prefill: {
+          name: checkout.fullName,
+          contact: checkout.phone
+        },
+        theme: { color: "#126b5c" },
+        handler: async (response) => {
+          try {
+            await api(`/payments/orders/${order.id}/pay`, {
+              method: "POST",
+              body: JSON.stringify({
+                razorpayOrderId: response.razorpay_order_id,
+                razorpayPaymentId: response.razorpay_payment_id,
+                razorpaySignature: response.razorpay_signature
+              })
+            }, customerToken);
+            setPayment({ orderId: "", providerOrderId: "", razorpayPaymentId: "", razorpaySignature: "" });
+            await Promise.all([loadCart(), loadOrders(), loadProducts()]);
+            resolve();
+          } catch (error) {
+            reject(error);
+          }
+        },
+        modal: {
+          ondismiss: () => {
+            setMessage("Payment was not completed. You can retry from checkout.");
+            resolve();
+          }
+        }
+      });
+      checkoutInstance.open();
     });
   }
 
@@ -370,6 +443,13 @@ function App() {
       }, customerToken);
       setPayment({ orderId: "", providerOrderId: "", razorpayPaymentId: "", razorpaySignature: "" });
       await Promise.all([loadCart(), loadOrders(), loadProducts()]);
+    });
+  }
+
+  async function updateOrderStatus(orderId, action) {
+    await run(action === "cancel" ? "Cancelling order" : "Requesting return", async () => {
+      await api(`/orders/${orderId}/${action}`, { method: "POST" }, customerToken);
+      await Promise.all([loadOrders(), loadProducts()]);
     });
   }
 
@@ -487,6 +567,8 @@ function App() {
           setCategory={setCategory}
           addToCart={addToCart}
           setSelectedProduct={setSelectedProduct}
+          setPage={setPage}
+          customerToken={customerToken}
         />
       )}
 
@@ -513,6 +595,7 @@ function App() {
           payment={payment}
           setPayment={setPayment}
           confirmPayment={confirmPayment}
+          paymentProvider={frontendConfig.paymentProvider}
         />
       )}
 
@@ -533,11 +616,16 @@ function App() {
           registerRequest={registerRequest}
           verifyOtp={verifyOtp}
           logout={() => logout("customer")}
+          googleClientId={frontendConfig.googleClientId}
+          onGoogleCredential={(idToken) => {
+            setGoogleLogin((current) => ({ ...current, idToken }));
+            loginWithGoogle(idToken);
+          }}
         />
       )}
 
       {page === "orders" && (
-        <OrdersPage orders={orders} />
+        <OrdersPage orders={orders} updateOrderStatus={updateOrderStatus} />
       )}
 
       {page === "admin" && (
@@ -581,7 +669,7 @@ function NavButton({ active, onClick, icon, label }) {
   );
 }
 
-function StorePage({ products, allProducts, category, setCategory, addToCart, setSelectedProduct }) {
+function StorePage({ products, allProducts, category, setCategory, addToCart, setSelectedProduct, setPage, customerToken }) {
   const featured = allProducts[0];
   return (
     <section className="pageGrid storeGrid">
@@ -595,6 +683,16 @@ function StorePage({ products, allProducts, category, setCategory, addToCart, se
       </aside>
 
       <section className="catalog">
+        {!customerToken && (
+          <div className="loginPrompt">
+            <div>
+              <strong>Shopping as a guest</strong>
+              <span>Add items now, then sign in at checkout to keep your cart.</span>
+            </div>
+            <button onClick={() => setPage("account")}><LogIn size={16} /> Sign in</button>
+          </div>
+        )}
+
         {featured && (
           <div className="dealBand">
             <img src={featured.imageUrl} alt={featured.name} />
@@ -671,7 +769,7 @@ function CartPage({ cart, cartTotal, shippingFee, updateCart, setPage, customerT
   );
 }
 
-function CheckoutPage({ cart, cartTotal, shippingFee, checkout, setCheckout, errors, placeOrder, payment, setPayment, confirmPayment }) {
+function CheckoutPage({ cart, cartTotal, shippingFee, checkout, setCheckout, errors, placeOrder, payment, setPayment, confirmPayment, paymentProvider }) {
   return (
     <section className="pageGrid checkoutGrid">
       <Panel title="Shipping Address" icon={<CreditCard size={19} />}>
@@ -702,7 +800,7 @@ function CheckoutPage({ cart, cartTotal, shippingFee, checkout, setCheckout, err
         </button>
       </OrderSummary>
 
-      {payment.orderId && (
+      {payment.orderId && paymentProvider !== "razorpay" && (
         <Panel title="Payment Confirmation" icon={<BadgeIndianRupee size={19} />}>
           <div className="paymentBox">
             <div>
@@ -715,11 +813,18 @@ function CheckoutPage({ cart, cartTotal, shippingFee, checkout, setCheckout, err
           </div>
         </Panel>
       )}
+      {payment.orderId && paymentProvider === "razorpay" && (
+        <Panel title="Payment Pending" icon={<BadgeIndianRupee size={19} />}>
+          <div className="paymentBox">
+            <span>Razorpay Checkout was opened for this order. If it was dismissed, place the order again or refresh your payment from Orders after adding a retry endpoint.</span>
+          </div>
+        </Panel>
+      )}
     </section>
   );
 }
 
-function AccountPage({ customerToken, login, setLogin, googleLogin, setGoogleLogin, register, setRegister, otp, setOtp, errors, loginCustomer, loginWithGoogle, registerRequest, verifyOtp, logout }) {
+function AccountPage({ customerToken, login, setLogin, googleLogin, setGoogleLogin, register, setRegister, otp, setOtp, errors, loginCustomer, loginWithGoogle, registerRequest, verifyOtp, logout, googleClientId, onGoogleCredential }) {
   return (
     <section className="pageGrid accountGrid">
       <Panel title="Customer Sign In" icon={<LogIn size={19} />}>
@@ -740,6 +845,7 @@ function AccountPage({ customerToken, login, setLogin, googleLogin, setGoogleLog
 
       <Panel title="Google OAuth" icon={<LogIn size={19} />}>
         <div className="formGrid">
+          {googleClientId && <GoogleSignInButton clientId={googleClientId} onCredential={onGoogleCredential} />}
           <Field name="idToken" placeholder="Google ID token" value={googleLogin.idToken} onChange={(value) => setGoogleLogin({ ...googleLogin, idToken: value })} />
           <Field name="googleEmail" placeholder="Email for local mode" value={googleLogin.email} error={errors.email} onChange={(value) => setGoogleLogin({ ...googleLogin, email: value })} />
           <Field name="googleName" placeholder="Display name" value={googleLogin.name} onChange={(value) => setGoogleLogin({ ...googleLogin, name: value })} />
@@ -763,7 +869,32 @@ function AccountPage({ customerToken, login, setLogin, googleLogin, setGoogleLog
   );
 }
 
-function OrdersPage({ orders }) {
+function GoogleSignInButton({ clientId, onCredential }) {
+  useEffect(() => {
+    let cancelled = false;
+    loadScript("https://accounts.google.com/gsi/client")
+      .then(() => {
+        if (cancelled || !window.google?.accounts?.id) return;
+        window.google.accounts.id.initialize({
+          client_id: clientId,
+          callback: (response) => onCredential(response.credential)
+        });
+        window.google.accounts.id.renderButton(
+          document.getElementById("googleSignInButton"),
+          { theme: "outline", size: "large", width: 280 }
+        );
+        window.google.accounts.id.prompt();
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [clientId]);
+
+  return <div id="googleSignInButton" className="googleButton" />;
+}
+
+function OrdersPage({ orders, updateOrderStatus }) {
   return (
     <section className="pageGrid">
       <Panel title="Your Orders" icon={<PackageCheck size={19} />} wide>
@@ -777,6 +908,14 @@ function OrdersPage({ orders }) {
               <div>
                 <strong>{money(order.total)}</strong>
                 <span>{order.items.length} items</span>
+              </div>
+              <div className="rowActions">
+                {["PAYMENT_PENDING", "PAID", "CONFIRMED"].includes(order.status) && (
+                  <button onClick={() => updateOrderStatus(order.id, "cancel")}>Cancel</button>
+                )}
+                {["PAID", "CONFIRMED"].includes(order.status) && (
+                  <button onClick={() => updateOrderStatus(order.id, "return")}>Return</button>
+                )}
               </div>
             </div>
           ))}

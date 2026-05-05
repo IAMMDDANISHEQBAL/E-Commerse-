@@ -23,19 +23,22 @@ public class OrderService {
     private final CartService cartService;
     private final PaymentService paymentService;
     private final AddressService addressService;
+    private final ProductCacheService productCacheService;
 
     public OrderService(OrderRepository orderRepository,
                         AddressRepository addressRepository,
                         CurrentUserService currentUserService,
                         CartService cartService,
                         PaymentService paymentService,
-                        AddressService addressService) {
+                        AddressService addressService,
+                        ProductCacheService productCacheService) {
         this.orderRepository = orderRepository;
         this.addressRepository = addressRepository;
         this.currentUserService = currentUserService;
         this.cartService = cartService;
         this.paymentService = paymentService;
         this.addressService = addressService;
+        this.productCacheService = productCacheService;
     }
 
     @Transactional
@@ -107,6 +110,33 @@ public class OrderService {
                 .orElseThrow(() -> new RuntimeException("Order not found")));
     }
 
+    @Transactional
+    public OrderResponse cancelOrder(Long orderId) {
+        CustomerOrder order = getMyOrderEntity(orderId);
+        if (order.getStatus() == OrderStatus.CANCELLED) {
+            return new OrderResponse(order);
+        }
+        if (order.getStatus() == OrderStatus.RETURNED || order.getStatus() == OrderStatus.RETURN_REQUESTED) {
+            throw new RuntimeException("Returned orders cannot be cancelled");
+        }
+        if (order.getStatus() == OrderStatus.PAID || order.getStatus() == OrderStatus.CONFIRMED) {
+            restoreInventory(order);
+        }
+        order.setStatus(OrderStatus.CANCELLED);
+        return new OrderResponse(orderRepository.save(order));
+    }
+
+    @Transactional
+    public OrderResponse requestReturn(Long orderId) {
+        CustomerOrder order = getMyOrderEntity(orderId);
+        if (order.getStatus() != OrderStatus.PAID && order.getStatus() != OrderStatus.CONFIRMED) {
+            throw new RuntimeException("Only paid orders can be returned");
+        }
+        restoreInventory(order);
+        order.setStatus(OrderStatus.RETURN_REQUESTED);
+        return new OrderResponse(orderRepository.save(order));
+    }
+
     CustomerOrder getMyOrderEntity(Long orderId) {
         User user = currentUserService.getCurrentUser();
         return orderRepository.findByIdAndUser(orderId, user)
@@ -117,6 +147,14 @@ public class OrderService {
     public void markPaid(CustomerOrder order) {
         order.setStatus(OrderStatus.PAID);
         orderRepository.save(order);
+    }
+
+    private void restoreInventory(CustomerOrder order) {
+        for (OrderItem item : order.getItems()) {
+            Product product = item.getProduct();
+            product.setQuantity(product.getQuantity() + item.getQuantity());
+            productCacheService.cacheProduct(product);
+        }
     }
 
     private Address resolveAddress(CheckoutRequest request, User user) {

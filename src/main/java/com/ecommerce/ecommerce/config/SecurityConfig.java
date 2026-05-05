@@ -37,6 +37,7 @@ public class SecurityConfig {
                                 "/auth/register-verify",
                                 "/auth/login",
                                 "/auth/google",
+                                "/public/**",
                                 "/h2-console/**"
                         ).permitAll()
 
