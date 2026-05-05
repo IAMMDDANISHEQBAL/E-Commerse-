@@ -32,6 +32,7 @@ public class AdminProductService {
     }
 
     public Brand createBrand(Brand brand) {
+        validateBrand(brand);
 
         return brandRepository.save(brand);
     }
@@ -39,6 +40,7 @@ public class AdminProductService {
     public Brand updateBrand(Long brandId, Brand request) {
         Brand brand = brandRepository.findById(brandId)
                 .orElseThrow(() -> new RuntimeException("Brand not found"));
+        validateBrand(request);
         brand.setName(request.getName());
         brand.setLogoUrl(request.getLogoUrl());
         Brand saved = brandRepository.save(brand);
@@ -49,6 +51,10 @@ public class AdminProductService {
     public void deleteBrand(Long brandId) {
         Brand brand = brandRepository.findById(brandId)
                 .orElseThrow(() -> new RuntimeException("Brand not found"));
+        productRepository.findByBrandId(brandId).forEach(product -> {
+            product.setBrand(null);
+            productCacheService.cacheProduct(productRepository.save(product));
+        });
         brandRepository.delete(brand);
         productCacheService.refreshProductCache();
     }
@@ -104,8 +110,20 @@ public class AdminProductService {
     }
 
     private void normalizeProduct(Product product) {
+        if (product.getName() == null || product.getName().isBlank()) {
+            throw new RuntimeException("Product name is required");
+        }
+        if (product.getDescription() == null || product.getDescription().isBlank()) {
+            throw new RuntimeException("Product description is required");
+        }
+        if (product.getPrice() <= 0) {
+            throw new RuntimeException("Product price must be greater than zero");
+        }
         if (product.getQuantity() < 0) {
             throw new RuntimeException("Inventory cannot be negative");
+        }
+        if (product.getCategory() == null) {
+            throw new RuntimeException("Product category is required");
         }
         if (product.getImageUrl() == null || product.getImageUrl().isBlank()) {
             product.setImageUrl(ProductCacheService.PLACEHOLDER_IMAGE);
@@ -113,6 +131,12 @@ public class AdminProductService {
         if (product.getBrand() != null && product.getBrand().getId() != null) {
             product.setBrand(brandRepository.findById(product.getBrand().getId())
                     .orElseThrow(() -> new RuntimeException("Brand not found")));
+        }
+    }
+
+    private void validateBrand(Brand brand) {
+        if (brand.getName() == null || brand.getName().isBlank()) {
+            throw new RuntimeException("Brand name is required");
         }
     }
 }
